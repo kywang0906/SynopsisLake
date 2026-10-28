@@ -1,0 +1,2 @@
+# Optional local JVM bridge. Databricks uses its existing Spark JVM instead.
+JPype1==1.6.0

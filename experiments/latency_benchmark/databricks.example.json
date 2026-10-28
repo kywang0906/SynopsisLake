@@ -1,0 +1,80 @@
+{
+  "experiment_kind": "research",
+  "bridge": "spark",
+  "methods": ["always_exact", "ml", "skewness"],
+  "histogram": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/merged_square.json",
+  "sources": [
+    "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/source_0.json",
+    "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/source_1.json",
+    "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/source_2.json",
+    "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/source_3.json"
+  ],
+  "queries": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/queries/original_split_queries.csv",
+  "output": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/results/REPLACE_NEW_RUN_ID",
+  "histogram_cache": "resident",
+  "exact": {
+    "backend": "spark",
+    "cache": "none",
+    "files": [
+      {
+        "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_0.csv",
+        "delimiter": ",",
+        "header": false,
+        "x_col": 0,
+        "y_col": 1
+      },
+      {
+        "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_1.csv",
+        "delimiter": ",",
+        "header": false,
+        "x_col": 0,
+        "y_col": 1
+      },
+      {
+        "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_2.csv",
+        "delimiter": ",",
+        "header": false,
+        "x_col": 0,
+        "y_col": 1
+      },
+      {
+        "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_3.csv",
+        "delimiter": ",",
+        "header": false,
+        "x_col": 0,
+        "y_col": 1
+      }
+    ]
+  },
+  "ml": {
+    "factory": "experiments.latency_benchmark.lightgbm_adapter:load",
+    "options": {
+      "model_path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/models/existing_lightgbm.txt",
+      "feature_callable": "team_features:extract",
+      "feature_names": ["REPLACE_WITH_EXACT_MODEL_FEATURE_NAMES"],
+      "num_threads": 1
+    },
+    "training_seconds": null
+  },
+  "skewness": {
+    "scale": 0.5,
+    "epsilon": 0.000001
+  },
+  "epsilon": 0.25,
+  "delta": 0.05,
+  "repeats": 5,
+  "warmup_queries": 2,
+  "seed": 0,
+  "dataset_version": "REPLACE_WITH_IMMUTABLE_RAW_POINT_DATASET_VERSION",
+  "split_lineage": "REPLACE_WITH_TEAM_ORIGINAL_SPLIT_ARTIFACT_AND_REVISION; join existing query_id assignments, do not resplit",
+  "environment": {
+    "databricks_runtime": "REPLACE_WITH_EXACT_RUNTIME_VERSION; repository CI currently targets 14.3 LTS / Spark 3.5.0 / Scala 2.12",
+    "compute": "REPLACE_WITH_NODE_TYPE_WORKER_COUNT_AND_ACCESS_MODE; requires classic dedicated/single-user compute with Spark JVM access",
+    "benchmark_jar": "REPLACE_WITH_BUILT_JAR_COMMIT_AND_LIBRARY_PATH; attach to compute before starting the notebook",
+    "ml_environment": "REPLACE_WITH_EXISTING_MODEL_TRAINING_ENVIRONMENT_VERSIONS; reuse team LightGBM and feature dependencies",
+    "raw_format": "REPLACE_COLUMNS_DELIMITER_AND_OPTIONAL_WEIGHT_COLUMN_FROM_ACTUAL_POINT_DATA; Spark inputs must not contain appended synopsis records",
+    "feature_contract": "team_features.extract(query, estimate, histogram, sources) must reuse the team's online feature computation and return a dictionary with the exact model feature names; no labels or feature tables",
+    "skewness_shape": "All-three example requires a square merged histogram. Remove skewness for rectangular grids until the existing core density-indexing defect is separately fixed.",
+    "cache_conditions": "No raw DataFrame persistence requested. OS, cloud-storage and Databricks I/O caches are not flushed. Record relevant cluster cache settings; do not label this cold-cache."
+  }
+}
