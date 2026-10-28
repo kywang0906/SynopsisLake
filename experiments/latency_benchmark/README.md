@@ -4,16 +4,16 @@
 
 ## 目前 checkout 有什麼
 
-起點為 `f5a21ce`。沒有 AGENTS.md。現有流程為：
+此分支以團隊 repo `kalvin1024/synopsislake` 的 `main`（`da3aeae`）為基底。沒有 AGENTS.md。先前 prototype 使用另一個 fork 的 `f5a21ce`；以下以團隊目前程式為準。
 
-1. `sigspatial25/CountHistExp` 與 `DataDrivenRangeQueryMergingRateExp` 載入來源、執行 ARM、評估 count-histogram。
-2. `SimpleSpatialHistogramOpt.RangeQuery` 用重疊面積比例估算。
-3. `RangeQueryWithRatio` 提供逐筆 Skewness score。尚無 calibration gate。
-4. `CountHistExp` 讀取預先給定的答案來算誤差，沒有線上 exact fallback。
-5. `BuildRangeAns` 展示原始 point 的閉區間判斷及可選權重，但它是離線 GT 產生器。
-6. `.github/workflows/build-upload-and-run.yml` 在 DBR 14.3 LTS / Scala 2.12 / single-user 上執行幾何摘要建構，不是 ML latency job。舊 `job-create.json` 使用另一組 DBFS 路徑。
+1. `sigspatial25/ErrorPredictionLogExp` 重用 ARM，輸出逐筆 `rows.csv`、`arm_<res>.txt` 及 `src_<i>.txt`。
+2. `ml/features.py` 以 histogram 與 query 計算 **19 個 v0 特徵**。`_query_features` 不使用真值；`build_table` 另外連接離線 labels，並排除 exact count <10 的 query。
+3. `ml/train_v0_local.py` 與 `ml/notebooks/02_train_v0.py` 訓練 LightGBM，依 query ID 做 50/20/30 train/calibration/test，training 另留 early-stopping slice，僅用 calibration 選 empirical cutoff。
+4. notebook 02 將 LightGBM text model 寫入 MLflow。既有 gate 為離線評估，沒有執行被拒絕查詢的 raw fallback，也未記錄完整查詢延遲。
+5. `SimpleSpatialHistogramOpt.RangeQuery`、`RangeQueryWithRatio` 提供估算與逐筆 Skewness score；`BuildRangeAns` 是離線原始資料答案產生器。
+6. `range_query/` 已包含原始資料與 query workload；`2.csv.gz`、`3.csv.gz` 需要在工作副本解壓。`.github/workflows/build-upload-and-run.yml` 透過 bundle 執行 `ml_xy_pipeline`／`synopsis_overhead_exp`，本 PR 不觸發部署。
 
-**此 checkout 沒有報告中的 LightGBM/v0/v1、feature pipeline、模型、既有 split，或研究用 10.5M points。** 不會用新 heuristic 冒充既有 ML。正式 ML run 必須提供下述接入資料。
+**團隊 repo 有離線 ML pipeline，不是缺少 ML 程式。** 但本 benchmark 仍需接入既有線上特徵 adapter、下載既有模型、匯出同一訓練 run 的 split manifest，以及提供 histogram exports 與可讀的原始資料位置。這次沒有改模型或重寫 19 個特徵，也沒有宣稱已接好報告中的 28-feature v1；實際 `FEATURES` 清單只有 19 個。
 
 ## 快速本機驗證
 
@@ -69,6 +69,8 @@ query_id,xmin,ymin,xmax,ymax,split
 請從團隊的**既有** split 匯出這份 manifest，不要重新亂數切分。
 同一 query 跨 merge rates 必須維持相同 split。本 runner 不會把其他欄位傳給 extractor。
 train rows 不會拿來校準或計時 test。
+團隊原始 `split_ids` 在排除 exact<10 的 eligible query IDs 上以既有 seed 分配；匯出時要保留原 run 的 eligible IDs 與 seed，不能先加入零／小答案 query 再重排。
+原 `queries-Ans.txt` 欄位順序是 `minLon,maxLon,minLat,maxLat,exactCount`；匯出本工具 CSV 時須轉成 `xmin,ymin,xmax,ymax`，不能直接照抄前四欄。
 
 Histogram/source JSON 格式：
 
@@ -79,11 +81,13 @@ Histogram/source JSON 格式：
 `counts[x][y]`。請從原 pipeline 的實際 source/merged arrays 匯出，保留原始浮點邊界。
 不在 benchmark 重建 ARM。不要把 geometric-histogram Parquet 當成 count-histogram。
 只有 features 真的需要來源時才設定 `sources`，並把需要的來源全部列出。
+既有 logger 的 `.txt` 格式在 `ml/SCHEMA.md`；本 prototype 載入 JSON，因此需先從實際 exports 轉換格式，不能把檔名改成 `.json` 就使用。
 
 原始資料在 `exact.files` 逐一宣告。座標欄為從 0 起算的 `x_col` / `y_col`，預設 0/1。
 `delimiter` 預設逗號；`header` 預設 false；有 `weight_col` 才做加權 count，否則每筆為 1。
 閉區間 `xmin <= x <= xmax && ymin <= y <= ymax` 沿用 `BuildRangeAns`。
 要確認這個語義與團隊原 query truth 一致，尤其是邊界點與權重。
+團隊 `authors_range` logger 讀取 tab-separated lon/lat，依 point 計數；範例採用 tab delimiter、沒有 weight_col。若改用其他資料格式，必須依該資料契約調整。
 
 `scan` 每次 exact 都重新開啟、解析、掃描原始 CSV，沒有答案快取。
 對帶有尾端 synopsis 的自訂檔案，必須明確填入 `data_rows` 排除尾端；不足列數會失敗。
@@ -123,7 +127,10 @@ def predict(features):
 }
 ```
 
-`team_features.extract(query, estimate, histogram, sources)` 必須重用既有線上特徵程式，回傳 feature-name 到 value 的 dict。
+`team_features.extract(query, estimate, histogram, sources)` 是**待接入介面**，目前 repo 沒有這個 module；必須實作薄 adapter，重用 `ml/features.py::_query_features`，回傳 feature-name 到 value 的 dict。
+v0 的 19 個名稱與順序以 `ml.features.FEATURES` 為準。`_query_features` 的 query 順序是 `[xmin,xmax,ymin,ymax]`，需從 runner 的 bounds 轉換。
+adapter 也須提供 `merge_rate`、同訓練語義的 `skew_pred`／`log_alpha`，並重用原 area、density contrast、median 等前置統計；各項初始化與 query-time 工作都要列入對應計時。
+原 v0 的 source 資訊只用 domain／resolution metadata；沒有報告中的額外 7 個 source-level 特徵。不要用 `build_table` 或 `rows.csv` 查詢預算好的 test 特徵或 score。
 model schema 與名稱順序不符會失敗。`features_ns` 包括 extractor 與 array 建構；`inference_ns` 包括 Booster.predict。
 模型 score 若是 log error，可直接用原分數做排序校準，不需要改模型。
 非有限 score 一律拒絕。Histogram/source 讀取在 runner 計時；extractor 另做的 query-time I/O 也必須在這些計時方法內。
@@ -156,6 +163,7 @@ ML 檔案尚未取得時，可以明確選 `methods: ["always_exact", "skewness"
 
 **Skewness 限制：** 本 checkout 的 `ComputeBetaDist` 在長方形網格使用錯誤 stride。
 bridge 對長方形的 Skewness 初始化明確失敗，避免回報失真的比較；長方形的 histogram estimate 仍支援。
+團隊 logger 已有 `-fixStride true` 的局部修正版，但該 helper 是 logger 私有方法，通用核心尚未修正；本 bridge 尚未接入該替代語義。模型若以修正版訓練，線上 score／log_alpha 必須保持相同語義。
 正式 histogram 若不是方形，移除 `skewness` 方法並記錄原因，待團隊另行修正核心。
 Skewness score 直接重用既有方法。它內部重算一次 estimate，此成本完整列入 `features_ns`。
 
@@ -198,5 +206,6 @@ p95 使用 nearest rank `ceil(0.95*n)`。`speedup_vs_exact` 是 mean exact / mea
 
 ## 正式 ML 實驗尚缺
 
-團隊既有 feature/model 程式與 schema、原 train/calibration/test manifest、同版本 count histograms、原始 point 檔案與權重/邊界語義、模型與訓練耗時紀錄、Databricks compute/Volume 權限。
+待接入的線上 feature adapter、下載後的既有 trained model（notebook 02 的 MLflow artifact）、原訓練 run 的 train/calibration/test manifest、同版本 count-histogram exports 轉出的 JSON、可讀取的原始 point 路徑／解壓檔、訓練耗時紀錄，以及 Databricks compute/Volume 權限。
+程式與 tracked workload 已存在；上述是執行實驗所需的 artifacts、格式轉換與存取設定，不能再概括為「repo 沒有 ML 或資料」。
 目前只能驗證 runner 與小資料流程，不能宣稱團隊 ML 加速、5% 達標，或已在 Databricks 驗證。

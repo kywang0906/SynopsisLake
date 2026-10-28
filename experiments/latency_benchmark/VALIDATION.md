@@ -2,8 +2,10 @@
 
 此紀錄只涵蓋本機正確性。尚未使用團隊模型或在 Databricks 執行研究效能測試。
 
-- Base revision：`f5a21ce366ab8a13d9a219a37282d4ad37073185`。
-- Branch：`feat/e2e-query-latency`。
+- 正確團隊 repository：`https://github.com/kalvin1024/synopsislake.git`。
+- Base revision：`da3aeaef7a308c679995395fcae265586371dff8`（團隊 main）。
+- 原改動最初在另一個 fork 的 `f5a21ce` 開發；已移植至團隊 main 並重新驗證。
+- 遠端分支名稱：`feat/e2e-query-latency`；本機移植分支：`feat/e2e-query-latency-team`。
 - 環境：Linux、Java 11.0.28、Maven 3.9.9、CPython 3.12.14。
 - Optional integration packages：JPype1 1.6.0、PySpark 3.5.0、Py4J 0.10.9.7、LightGBM 4.6.0、NumPy 2.5.4、SciPy 1.18.1。
 
@@ -42,4 +44,4 @@ README 提供不含機器特定路徑的重現指令。
 | `test_empty` | histogram | 0 | 0 |
 
 不報告六點 fixture 的研究加速比。樣本太小，不能推論效能或 5% 風險控制能力。
-正式實驗仍需要團隊模型/特徵、原始 split、source/merged count arrays、原始 point workload 與 Databricks 權限。
+團隊 main 已含離線 v0 特徵/訓練/logger 與 range_query 資料。正式 ML 實驗仍需要訓練產物、原 split 的匯出與 lineage、線上 feature wrapper、相同版本的 source/merged exports，以及 Databricks 權限；不能把既有 raw data 未上傳 Volume 誤稱為 repository 缺少資料。

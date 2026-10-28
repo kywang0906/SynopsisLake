@@ -1,7 +1,11 @@
 {
   "experiment_kind": "research",
   "bridge": "spark",
-  "methods": ["always_exact", "ml", "skewness"],
+  "methods": [
+    "always_exact",
+    "ml",
+    "skewness"
+  ],
   "histogram": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/merged_square.json",
   "sources": [
     "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/histograms/source_0.json",
@@ -18,28 +22,28 @@
     "files": [
       {
         "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_0.csv",
-        "delimiter": ",",
+        "delimiter": "\t",
         "header": false,
         "x_col": 0,
         "y_col": 1
       },
       {
         "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_1.csv",
-        "delimiter": ",",
+        "delimiter": "\t",
         "header": false,
         "x_col": 0,
         "y_col": 1
       },
       {
         "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_2.csv",
-        "delimiter": ",",
+        "delimiter": "\t",
         "header": false,
         "x_col": 0,
         "y_col": 1
       },
       {
         "path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/raw/points_3.csv",
-        "delimiter": ",",
+        "delimiter": "\t",
         "header": false,
         "x_col": 0,
         "y_col": 1
@@ -51,14 +55,34 @@
     "options": {
       "model_path": "/Volumes/REPLACE_CATALOG/REPLACE_SCHEMA/REPLACE_VOLUME/models/existing_lightgbm.txt",
       "feature_callable": "team_features:extract",
-      "feature_names": ["REPLACE_WITH_EXACT_MODEL_FEATURE_NAMES"],
+      "feature_names": [
+        "area_cells",
+        "n_cells",
+        "n_partial",
+        "side_frac",
+        "log_est",
+        "log_full",
+        "bound_rel",
+        "edge_share",
+        "edge_contrast",
+        "in_out",
+        "empty_partial",
+        "est_frac",
+        "density_ratio",
+        "merge_rate",
+        "n_src_overlap",
+        "src_res_min",
+        "src_res_max",
+        "skew_pred",
+        "log_alpha"
+      ],
       "num_threads": 1
     },
     "training_seconds": null
   },
   "skewness": {
     "scale": 0.5,
-    "epsilon": 0.000001
+    "epsilon": 1e-06
   },
   "epsilon": 0.25,
   "delta": 0.05,
@@ -66,15 +90,17 @@
   "warmup_queries": 2,
   "seed": 0,
   "dataset_version": "REPLACE_WITH_IMMUTABLE_RAW_POINT_DATASET_VERSION",
-  "split_lineage": "REPLACE_WITH_TEAM_ORIGINAL_SPLIT_ARTIFACT_AND_REVISION; join existing query_id assignments, do not resplit",
+  "split_lineage": "REPLACE_WITH_ORIGINAL_RUN_SPLIT_MANIFEST; reuse ml/train_v0_local.py split_ids on the original exact>=10 eligible IDs and original seed, do not resplit all queries",
   "environment": {
     "databricks_runtime": "REPLACE_WITH_EXACT_RUNTIME_VERSION; repository CI currently targets 14.3 LTS / Spark 3.5.0 / Scala 2.12",
     "compute": "REPLACE_WITH_NODE_TYPE_WORKER_COUNT_AND_ACCESS_MODE; requires classic dedicated/single-user compute with Spark JVM access",
     "benchmark_jar": "REPLACE_WITH_BUILT_JAR_COMMIT_AND_LIBRARY_PATH; attach to compute before starting the notebook",
     "ml_environment": "REPLACE_WITH_EXISTING_MODEL_TRAINING_ENVIRONMENT_VERSIONS; reuse team LightGBM and feature dependencies",
-    "raw_format": "REPLACE_COLUMNS_DELIMITER_AND_OPTIONAL_WEIGHT_COLUMN_FROM_ACTUAL_POINT_DATA; Spark inputs must not contain appended synopsis records",
-    "feature_contract": "team_features.extract(query, estimate, histogram, sources) must reuse the team's online feature computation and return a dictionary with the exact model feature names; no labels or feature tables",
-    "skewness_shape": "All-three example requires a square merged histogram. Remove skewness for rectangular grids until the existing core density-indexing defect is separately fixed.",
-    "cache_conditions": "No raw DataFrame persistence requested. OS, cloud-storage and Databricks I/O caches are not flushed. Record relevant cluster cache settings; do not label this cold-cache."
+    "raw_format": "Example matches tab-separated authors_range point CSVs, unweighted lon/lat columns 0/1; tracked 2.csv.gz and 3.csv.gz need decompressed readable copies. Spark inputs must not contain appended synopsis records.",
+    "feature_contract": "Integration placeholder: team_features.extract does not exist yet. Implement a thin online adapter reusing ml/features.py _query_features with original query order xmin,xmax,ymin,ymax, histogram-only preprocessing and matching merge_rate/skew_pred/log_alpha. Schema shown is current 19-feature v0, not the report's unverified 28-feature v1. No labels or cached test features/scores.",
+    "skewness_shape": "All-three example requires a square merged histogram. Core ComputeBetaDist still has rectangular stride defect; logger has private -fixStride true alternative not used by this bridge. Preserve model training-time score semantics; omit unsupported comparison.",
+    "cache_conditions": "No raw DataFrame persistence requested. OS, cloud-storage and Databricks I/O caches are not flushed. Record relevant cluster cache settings; do not label this cold-cache.",
+    "histogram_export": "Convert actual ErrorPredictionLogExp arm_<res>.txt/src_<i>.txt arrays to JSON x_edges/y_edges/counts before this prototype; preserve exact edges and source identities.",
+    "team_base": "kalvin1024/synopsislake main da3aeae; offline v0 and range_query workload are present. Download trained model artifact and export original split manifest; online feature integration remains required."
   }
 }
