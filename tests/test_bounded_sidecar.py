@@ -43,7 +43,7 @@ TRAIN_RECTANGLES = np.asarray([
 
 def r08_analytic_module():
     """Read the retained reference, rather than mirroring its math in a test."""
-    notebook = Path(__file__).resolve().parents[1] / "ml/notebooks/R08_compact_distribution_critic.ipynb"
+    notebook = Path(__file__).resolve().parents[1] / "ml/notebooks/20_compact_distribution_critic.ipynb"
     document = json.loads(notebook.read_text())
     for cell in document["cells"]:
         if cell.get("cell_type") != "code":
