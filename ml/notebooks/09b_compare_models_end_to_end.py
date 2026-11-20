@@ -236,6 +236,8 @@ print("Input and execution manifest:", result_dir / "manifest.json")
 # MAGIC Share `09b_comparison_results.zip` from the completed run. It contains the comparison tables, per-query
 # MAGIC evidence and provenance needed to assess whether source shape improves on the saved Europe models under
 # MAGIC the same conditions. Keep the original run and model folders for replay. No new notebook 22 run is required.
+# MAGIC ZIP files are built and verified on driver-local `/tmp`, then copied sequentially to the result directory.
+# MAGIC This avoids random-write failures when the result directory is on a Databricks Volume.
 
 # COMMAND ----------
 
@@ -244,3 +246,26 @@ if not review_zip.is_file():
     raise FileNotFoundError("The comparison completed without its review ZIP. Check the run status and packaging logs.")
 print("Share this file:", review_zip)
 print("Keep this completed run directory:", result_dir)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Optional: recover a failed ZIP export without rerunning the comparison
+# MAGIC
+# MAGIC Leave the path below blank during normal execution. If the comparison passed its numerical checks but
+# MAGIC failed while writing the ZIP, set it to that exact `09b-...` result directory and run **only the next cell**.
+# MAGIC It checks the saved validation flag, result tables, protocol and frozen input hashes before exporting.
+# MAGIC It does not execute queries, retrain, recalibrate or change the saved timings. An incomplete numerical run
+# MAGIC is refused. An old partial ZIP may be replaced; result CSVs and prior error details are preserved.
+# MAGIC After pulling this fix, restart Python and run only the imports/settings cell and this recovery cell.
+
+# COMMAND ----------
+
+RECOVERY_RUN_DIR = ""  # Exact failed 09b result directory; never a personal path committed to Git.
+if RECOVERY_RUN_DIR.strip():
+    result_dir = Path(RECOVERY_RUN_DIR).expanduser().resolve()
+    review_zip = compare_shape_e2e.package_results(result_dir, overwrite=True)
+    print("Saved results exported without rerunning queries:", review_zip)
+    print("Original result CSVs and experiment timings are unchanged:", result_dir)
+else:
+    print("Export-only recovery is inactive. Leave RECOVERY_RUN_DIR blank for a normal run.")

@@ -400,6 +400,20 @@ For a local replay, put the same widget settings in a JSON file and run:
 python -m ml.compare_shape_e2e --config /path/to/comparison-settings.json
 ```
 
+The review ZIP is built and CRC-checked on driver-local `/tmp`, then published with sequential writes and a
+SHA256 readback check. Building ZIP headers directly on a Unity Catalog Volume can fail with `OSError: [Errno 5]`.
+If a prior run failed **only during ZIP export**, use the notebook's optional export-only recovery cell or:
+
+```bash
+python -m ml.compare_shape_e2e --package-only /path/to/compare/09b-EXACT-RUN --overwrite-archive
+```
+
+This verifies the persisted numerical-validation flag, final tables, protocol identity and frozen input hashes;
+it refuses a run that failed before numerical validation. It replaces an old partial ZIP, preserves CSVs and
+original timings, and keeps the prior failure in `manifest.json` under `export_recoveries`. It performs no Java
+query execution, training, recalibration or retiming. Local staging disk must fit the compressed results archive.
+Export time and input rechecks remain outside the original experimental timing scope.
+
 The optional training `model_manifest` must come from the training run, not be invented from the test results.
 Its schema is `dataset`, integer `seed`, `split_kind="query"`, `eligible_query_ids_sha256` (SHA256 of JSON-encoded
 sorted eligible IDs with separators `(',', ':')`), and `models: {name: {model_sha256: ...}}`. It declares and

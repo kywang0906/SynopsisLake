@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import time
+import traceback
 from uuid import uuid4
 import zipfile
 
@@ -27,6 +28,7 @@ from sklearn.metrics import roc_auc_score
 
 from .features import load_hist
 from .gate_eval import cutoff, split_ids
+from .result_archive import package_directory
 from .shape_e2e_inputs import prepare_shape_metadata, verify_shape_metadata
 
 MAIN_CLASS = "sigspatial25.ApproxQueryExp"
@@ -350,6 +352,67 @@ def _model_provenance(c, models, roles):
     return status
 
 
+def package_results(run_dir, *, overwrite=False) -> Path:
+    """Export an already validated run; never execute Java or change a gate.
+
+    Legacy runs can say ``failed`` after a ZIP write error despite passing all
+    numerical checks. The persisted parity flag and protocol digest distinguish
+    that case from a failure during execution or answer validation.
+    """
+    out = Path(run_dir).expanduser().resolve(strict=True)
+    state = json.loads((out/"manifest.json").read_text(encoding="utf-8"))
+    if (state.get("status") not in ("complete", "failed")
+            or state.get("exact_truth_parity") is not True
+            or state.get("no_training") is not True
+            or state.get("unchanged_H") is not True
+            or state.get("model_weights_modified") is not False):
+        raise ValueError("Export-only recovery requires completed numerical validation; do not mark an unfinished run complete")
+    protocol_file = out/"protocol.json"
+    if state.get("input_protocol_sha256") != _sha(protocol_file):
+        raise ValueError("Frozen protocol hash differs; export-only recovery refused")
+    protocol = json.loads(protocol_file.read_text(encoding="utf-8"))
+    if (protocol.get("frozen_before_test_execution") is not True
+            or protocol.get("no_test_threshold_selection") is not True
+            or not protocol.get("files_sha256")):
+        raise ValueError("Missing frozen test/calibration protocol; export-only recovery refused")
+    required = ("summary.csv", "per_query.csv", "parity.csv", "timing.csv", "setup_times.csv",
+                "payload_costs.csv", "raw_audit.csv", "frozen_cutoffs.csv", "calibration.csv")
+    for name in required:
+        table = pd.read_csv(out/name)
+        if table.empty:
+            raise ValueError("Incomplete result table: " + name)
+        if name == "parity.csv":
+            for column in ("same_H", "fallback_matches_exact", "stable_repeat"):
+                if not table[column].astype(str).str.lower().eq("true").all():
+                    raise ValueError("Numerical parity check failed: " + column)
+    if not (out/"README.txt").is_file():
+        raise FileNotFoundError("Missing README.txt; this is not the completed-results ZIP failure")
+    archive = out/"09b_comparison_results.zip"
+    if archive.exists() and not overwrite:
+        raise FileExistsError(f"Archive already exists: {archive}; use overwrite=True for a partial failed export")
+    # This is I/O verification only, outside all saved experiment timings.
+    _check_hashes(protocol["files_sha256"])
+    previous = json.loads(json.dumps(state))
+    state.setdefault("export_recoveries", []).append(dict(
+        requested_utc=datetime.now(timezone.utc).isoformat(),
+        previous_status=state["status"], previous_error=state.get("error"),
+        previous_phase=state.get("phase"), previous_traceback=state.get("traceback"),
+        action="package saved results only; no Java, training, calibration, or retiming"))
+    state.update(status="complete", phase="complete", archive_storage="local ZIP staging then sequential copy to result directory")
+    state.pop("error", None)
+    state.pop("traceback", None)
+    try:
+        _json(out/"manifest.json", state)
+        return package_directory(out, overwrite=overwrite)
+    except BaseException:
+        # A failed recovery must not turn a failed export into a success.
+        try:
+            _json(out/"manifest.json", previous)
+        except OSError:
+            pass  # Preserve the original export exception on an unhealthy mount.
+        raise
+
+
 def run_comparison(config) -> Path:
     """Run the existing 09b workload with a shared Java calibration and E2E timer."""
     c = _config(config)
@@ -508,6 +571,7 @@ def run_comparison(config) -> Path:
             st = pd.read_csv(Path(record["folder"])/"setup.csv")
             setup_records.append(st.assign(setup=method, repeat=rep, merge_rate=rate))
             print(f"Repeat {rep}: {method}, rate={rate}, batch={record['total_s']:.3f}s")
+        state["phase"] = "finalizing_results"
         timing = pd.DataFrame(records)
         timing.to_csv(out/"timing.csv", index=False)
         pd.concat(setup_records, ignore_index=True).to_csv(out/"setup_times.csv", index=False)
@@ -575,7 +639,7 @@ def run_comparison(config) -> Path:
                                   scope="actual shared Java SynopsisStore loads every ARM/source export; excludes JAR/raw/query/output files"))
         pd.DataFrame(costs).to_csv(out/"payload_costs.csv", index=False)
         _check_hashes(hashes)
-        state.update(status="complete", finished_utc=datetime.now(timezone.utc).isoformat(),
+        state.update(status="complete", phase="complete", finished_utc=datetime.now(timezone.utc).isoformat(),
                      comparison_seconds=time.perf_counter()-started, unique_timed_queries=len(test_ids),
                      calibration_queries=len(ca_ids), rates=rates, input_protocol_sha256=_sha(out/"protocol.json"),
                      versions={name:importlib.metadata.version(name) for name in ("numpy", "pandas", "pyarrow", "lightgbm", "scikit-learn")},
@@ -584,6 +648,7 @@ def run_comparison(config) -> Path:
                                       logical_cpu_count=os.cpu_count(), python=platform.python_version(),
                                       databricks_runtime=os.environ.get("DATABRICKS_RUNTIME_VERSION", "not available")),
                      exact_truth_parity=True, model_weights_modified=False,
+                     archive_storage="local ZIP staging then sequential copy to result directory",
                      output_zip_excludes="external raw files, external model weights and source/H inputs; their identities are frozen in protocol.json")
         _json(out/"manifest.json", state)
         (out/"README.txt").write_text(
@@ -596,23 +661,35 @@ def run_comparison(config) -> Path:
             "Raw data is loaded once per Java process and scanned for each exact/rejected query.\n"
             "No OS cache flushing or future-risk guarantee. Training/construction/calibration are outside timed batches.\n",
             encoding="utf-8")
-        with zipfile.ZipFile(out/"09b_comparison_results.zip", "w", zipfile.ZIP_DEFLATED) as z:
-            for p in sorted(out.rglob("*")):
-                if p.is_file() and p.suffix != ".zip":
-                    z.write(p, str(p.relative_to(out)))
+        state["phase"] = "packaging_results"
+        package_directory(out)
         print("Completed:", out)
         return out
     except BaseException as exc:
-        state.update(status="failed", error=str(exc))
-        _json(out/"manifest.json", state)
+        state.update(status="failed", error=str(exc), traceback=traceback.format_exc())
+        try:
+            _json(out/"manifest.json", state)
+        except OSError as metadata_error:
+            print("Could not save failure metadata:", metadata_error)
+        if hasattr(exc, "add_note"):
+            exc.add_note(f"09b results: {out}; phase={state.get('phase', 'execution')}. "
+                         "For a packaging-only failure, use package_results(run_dir, overwrite=True); do not rerun the timing cell.")
         raise
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", required=True, help="JSON settings; paths and models match the existing 09b run")
+    source = ap.add_mutually_exclusive_group(required=True)
+    source.add_argument("--config", help="JSON settings; paths and models match the existing 09b run")
+    source.add_argument("--package-only", metavar="RUN_DIR", help="Export an already validated run without rerunning queries")
+    ap.add_argument("--overwrite-archive", action="store_true", help="Replace a partial ZIP during export-only recovery")
     args = ap.parse_args(argv)
-    print(run_comparison(json.loads(Path(args.config).read_text())))
+    if args.package_only:
+        print(package_results(args.package_only, overwrite=args.overwrite_archive))
+    else:
+        if args.overwrite_archive:
+            ap.error("--overwrite-archive requires --package-only")
+        print(run_comparison(json.loads(Path(args.config).read_text())))
 
 
 if __name__ == "__main__":
